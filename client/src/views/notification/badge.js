@@ -54,6 +54,8 @@ Espo.define('views/notification/badge', 'view', function (Dep) {
 
             this.notificationSoundsDisabled = this.getConfig().get('notificationSoundsDisabled');
 
+            this.useWebSocket = this.getConfig().get('useWebSocket');
+
             this.once('remove', function () {
                 if (this.timeout) {
                     clearTimeout(this.timeout);
@@ -167,6 +169,12 @@ Espo.define('views/notification/badge', 'view', function (Dep) {
         runCheckUpdates: function (isFirstCheck) {
             this.checkUpdates(isFirstCheck);
 
+            if (this.useWebSocket) {
+                this.getHelper().webSocketManager.subscribe('newNotification', function () {
+                    this.checkUpdates();
+                }.bind(this))
+                return;
+            }
             this.timeout = setTimeout(function () {
                 this.runCheckUpdates();
             }.bind(this), this.notificationsCheckInterval * 1000);

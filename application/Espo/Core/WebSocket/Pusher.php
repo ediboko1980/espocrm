@@ -1,0 +1,213 @@
+<?php
+/************************************************************************
+ * This file is part of EspoCRM.
+ *
+ * EspoCRM - Open Source CRM application.
+ * Copyright (C) 2014-2018 Yuri Kuznetsov, Taras Machyshyn, Oleksiy Avramenko
+ * Website: http://www.espocrm.com
+ *
+ * EspoCRM is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * EspoCRM is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with EspoCRM. If not, see http://www.gnu.org/licenses/.
+ *
+ * The interactive user interfaces in modified source and object code versions
+ * of this program must display Appropriate Legal Notices, as required under
+ * Section 5 of the GNU General Public License version 3.
+ *
+ * In accordance with Section 7(b) of the GNU General Public License version 3,
+ * these Appropriate Legal Notices must retain the display of the "EspoCRM" word.
+ ************************************************************************/
+
+namespace Espo\Core\WebSocket;
+
+use Ratchet\ConnectionInterface;
+use Ratchet\Wamp\WampServerInterface;
+
+class Pusher implements WampServerInterface
+{
+    protected $categoryList = ['newNotification'];
+
+    protected $connectionIdUserIdMap = [];
+
+    protected $userIdConnectionIdListMap = [];
+
+    protected $connectionIdTopicIdListMap = [];
+
+    protected $connections = [];
+
+    public function onSubscribe(ConnectionInterface $connection, $topic)
+    {
+        $topicId = $topic->getId();
+        if (!$topicId) return;
+
+        echo "onSubscribe {$topicId}\n";
+
+        if (strpos($topicId, 'user.') === 0) {
+            $this->subscribeUser($connection, substr($topicId, 5));
+            return;
+        }
+
+        if (!in_array($topicId, $this->categoryList)) return;
+
+        $connectionId = $connection->resourceId;
+
+        $userId = $this->getUserIdByConnection($connection);
+        if (!$userId) return;
+
+        if (!isset($this->connectionIdTopicIdListMap[$connectionId])) $this->connectionIdTopicIdListMap[$connectionId] = [];
+
+        if (!in_array($topicId, $this->connectionIdTopicIdListMap[$connectionId])) {
+            echo "add topic {$topicId} for {$userId}\n";
+            $this->connectionIdTopicIdListMap[$connectionId][] = $topicId;
+        }
+    }
+
+    public function onUnSubscribe(ConnectionInterface $connection, $topic)
+    {
+        $topicId = $topic->getId();
+        if (!$topicId) return;
+
+        echo "onUnSubscribe {$topicId}\n";
+
+        if (strpos($topicId, 'user.') === 0) {
+            $this->unSubscribeUser($connection, substr($topicId, 5));
+            return;
+        }
+
+        if (!in_array($topicId, $this->categoryList)) return;
+
+        $connectionId = $connection->resourceId;
+
+        $userId = $this->getUserIdByConnection($connection);
+        if (!$userId) return;
+
+        if (isset($this->connectionIdTopicIdListMap[$connectionId])) {
+            $index = array_search($topicId, $this->connectionIdTopicIdListMap[$connectionId]);
+            if ($index !== false) {
+                echo "remove topic {$topicId} for {$userId}\n";
+                $this->connectionIdTopicIdListMap[$connectionId] = array_splice($this->connectionIdTopicIdListMap[$connectionId], $index, 1);
+            }
+        }
+    }
+
+    protected function getConnectionIdListByUserId($userId)
+    {
+        if (!isset($this->userIdConnectionIdListMap[$userId])) return [];
+        return $this->userIdConnectionIdListMap[$userId];
+    }
+
+    protected function getUserIdByConnection(ConnectionInterface $connection)
+    {
+        if (!isset($this->connectionIdUserIdMap[$connection->resourceId])) return;
+        return $this->connectionIdUserIdMap[$connection->resourceId];
+    }
+
+    protected function subscribeUser(ConnectionInterface $connection, $userId)
+    {
+        $resourceId = $connection->resourceId;
+
+        $this->connectionIdUserIdMap[$resourceId] = $userId;
+
+        if (!isset($this->userIdConnectionIdListMap[$userId])) $this->userIdConnectionIdListMap[$userId] = [];
+
+        if (!in_array($resourceId, $this->userIdConnectionIdListMap[$userId])) {
+            $this->userIdConnectionIdListMap[$userId][] = $resourceId;
+        }
+
+        $this->connections[$resourceId] = $connection;
+    }
+
+    protected function unSubscribeUser(ConnectionInterface $connection, $userId)
+    {
+        $resourceId = $connection->resourceId;
+
+        unset($this->connectionIdUserIdMap[$resourceId]);
+
+        if (isset($this->userIdConnectionIdListMap[$userId])) {
+            $index = array_search($resourceId, $this->userIdConnectionIdListMap[$userId]);
+            if ($index !== false) {
+                $this->userIdConnectionIdListMap[$userId] = array_splice($this->userIdConnectionIdListMap[$userId], $index, 1);
+            }
+        }
+    }
+
+    public function onOpen(ConnectionInterface $connection)
+    {
+        echo "onOpen {$connection->resourceId}\n";
+    }
+
+    public function onClose(ConnectionInterface $connection)
+    {
+        echo "onClose {$connection->resourceId}\n";
+
+        $userId = $this->getUserIdByConnection($connection);
+
+        if ($userId) {
+            $this->unSubscribeUser($connection, $userId);
+        }
+
+        unset($this->connections[$connection->resourceId]);
+    }
+
+    public function onCall(ConnectionInterface $connection, $id, $topic, array $params)
+    {
+        echo "onPublish {$connection->resourceId} {$id}\n";
+
+        $connection->callError($id, $topic, 'You are not allowed to make calls')->close();
+    }
+
+    public function onPublish(ConnectionInterface $connection, $topic, $event, array $exclude, array $eligible)
+    {
+        $topicId = $topic->getId();
+        echo "onPublish {$connection->resourceId} {$topicId}\n";
+
+        $connection->close();
+    }
+
+    public function onError(ConnectionInterface $connection, \Exception $e)
+    {
+    }
+
+    public function onMessageReceive($data)
+    {
+        $dataAssoc = json_decode($data, true);
+        $data = json_decode($data);
+
+        if (!property_exists($data, 'category')) return;
+        if (!property_exists($data, 'userId')) return;
+
+        $userId = $data->userId;
+        $category = $data->category;
+
+        if (!$userId || !$category) return;
+
+        if (!in_array($category, $this->categoryList)) return;
+
+        print_r($this->connectionIdTopicIdListMap);
+        print_r($this->userIdConnectionIdListMap);
+        print_r($this->connectionIdUserIdMap);
+
+        foreach ($this->getConnectionIdListByUserId($userId) as $connectionId) {
+            if (!isset($this->connections[$connectionId])) continue;
+            if (!isset($this->connectionIdTopicIdListMap[$connectionId])) continue;
+
+            $connection = $this->connections[$connectionId];
+
+            if (in_array($category, $this->connectionIdTopicIdListMap[$connectionId])) {
+                echo "send {$category} for connection {$connectionId}\n";
+                $connection->event($category, $dataAssoc);
+            }
+        }
+
+        echo "onMessage {$category} for {$userId}\n";
+    }
+}
