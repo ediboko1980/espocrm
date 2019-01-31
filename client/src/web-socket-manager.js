@@ -92,6 +92,19 @@ Espo.define('web-socket-manager', ['lib!client/lib/autobahn.js'], function () {
             try {
                 this.connection.subscribe(category, callback);
             } catch (e) {
+                if (e.message) {
+                    console.error(e.message);
+                } else {
+                    console.error("Coud not subscribe to not connected WebSocket.");
+                }
+            }
+        },
+
+        close: function () {
+            if (!this.connection) return;
+            try {
+                this.connection.close();
+            } catch (e) {
                 console.error(e.message);
             }
         },

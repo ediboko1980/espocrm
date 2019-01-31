@@ -504,6 +504,10 @@ Espo.define(
                 }
             }
 
+            if (this.webSocketManager) {
+                this.webSocketManager.close();
+            }
+
             this.auth = null;
             this.user.clear();
             this.preferences.clear();
