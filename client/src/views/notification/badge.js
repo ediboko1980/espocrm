@@ -67,7 +67,6 @@ Espo.define('views/notification/badge', 'view', function (Dep) {
 
             this.notificationsCheckInterval = this.getConfig().get('notificationsCheckInterval') || this.notificationsCheckInterval;
 
-            this.popupCheckIteration = 0;
             this.lastId = 0;
             this.shownNotificationIds = [];
             this.closedNotificationIds = [];
@@ -145,9 +144,8 @@ Espo.define('views/notification/badge', 'view', function (Dep) {
                 return;
             }
 
-            $.ajax('Notification/action/notReadCount').done(function (count) {
+            Espo.Ajax.getRequest('Notification/action/notReadCount').done(function (count) {
                 if (!isFirstCheck && count > this.unreadCount) {
-
                     var blockPlayNotificationSound = localStorage.getItem('blockPlayNotificationSound');
                     if (!blockPlayNotificationSound) {
                         this.playSound();
@@ -170,7 +168,8 @@ Espo.define('views/notification/badge', 'view', function (Dep) {
             this.checkUpdates(isFirstCheck);
 
             if (this.useWebSocket) {
-                this.getHelper().webSocketManager.subscribe('newNotification', function () {
+                this.getHelper().webSocketManager.subscribe('newNotification', function (a, b) {
+                    console.log(a, b);
                     this.checkUpdates();
                 }.bind(this))
                 return;
@@ -180,17 +179,25 @@ Espo.define('views/notification/badge', 'view', function (Dep) {
             }.bind(this), this.notificationsCheckInterval * 1000);
         },
 
-        checkPopupNotifications: function (name) {
+        checkPopupNotifications: function (name, isNotFirstCheck) {
             var data = this.popupNotificationsData[name] || {};
             var url = data.url;
             var interval = data.interval;
             var disabled = data.disabled || false;
 
             if (disabled || !url || !interval) return;
+            if (data.portalDisabled && this.getUser().isPortal()) return;
 
-            var isFirstCheck = false;
-            if (this.popupCheckIteration == 0) {
-                isFirstCheck = true;
+            var useWebSocket = this.useWebSocket && data.useWebSocket;
+            if (useWebSocket) {
+                var category = 'popupNotifications.' + (data.webSocketCategory || name);
+                this.getHelper().webSocketManager.subscribe(category, function (c, response) {
+                    console.log(response, c);
+                    if (!response.list) return;
+                    response.list.forEach(function (item) {
+                        this.showPopupNotification(name, item);
+                    }, this);
+                }.bind(this))
             }
 
             (new Promise(function (resolve) {
@@ -198,9 +205,9 @@ Espo.define('views/notification/badge', 'view', function (Dep) {
                     resolve();
                     return;
                 }
-                var jqxhr = $.ajax(url).done(function (list) {
-                    list.forEach(function (d) {
-                        this.showPopupNotification(name, d, isFirstCheck);
+                var jqxhr = Espo.Ajax.getRequest(url).done(function (list) {
+                    list.forEach(function (item) {
+                        this.showPopupNotification(name, item, isNotFirstCheck);
                     }, this);
                 }.bind(this));
 
@@ -208,14 +215,15 @@ Espo.define('views/notification/badge', 'view', function (Dep) {
                     resolve();
                 });
             }.bind(this))).then(function () {
+                if (useWebSocket) return;
+
                 this.popoupTimeouts[name] = setTimeout(function () {
-                    this.popupCheckIteration++;
-                    this.checkPopupNotifications(name);
+                    this.checkPopupNotifications(name, isNotFirstCheck);
                 }.bind(this), interval * 1000);
             }.bind(this));
         },
 
-        showPopupNotification: function (name, data, isFirstCheck) {
+        showPopupNotification: function (name, data, isNotFirstCheck) {
             var view = this.popupNotificationsData[name].view;
             if (!view) return;
 
@@ -241,7 +249,7 @@ Espo.define('views/notification/badge', 'view', function (Dep) {
                 notificationData: data.data || {},
                 notificationId: data.id,
                 id: id,
-                isFirstCheck: isFirstCheck
+                isFirstCheck: !isNotFirstCheck,
             }, function (view) {
                 view.render();
                 this.$popupContainer.removeClass('hidden');

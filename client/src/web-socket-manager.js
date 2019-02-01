@@ -26,13 +26,11 @@
  * these Appropriate Legal Notices must retain the display of the "EspoCRM" word.
  ************************************************************************/
 
-Espo.define('web-socket-manager', ['lib!client/lib/autobahn.js'], function () {
+define('web-socket-manager', ['lib!client/lib/autobahn.js'], function () {
 
     var WebSocketManager = function (config) {
         this.config = config;
-
         var url = this.config.get('webSocketUrl');
-
         this.port = 8080;
 
         if (url) {
@@ -96,7 +94,20 @@ Espo.define('web-socket-manager', ['lib!client/lib/autobahn.js'], function () {
                 if (e.message) {
                     console.error(e.message);
                 } else {
-                    console.error("Coud not subscribe to not connected WebSocket.");
+                    console.error("Coud not subscribe "+category+" to WebSocket.");
+                }
+            }
+        },
+
+        unsubscribe: function (category, callback) {
+            if (!this.connection) return;
+            try {
+                this.connection.unsubscribe(category, callback);
+            } catch (e) {
+                if (e.message) {
+                    console.error(e.message);
+                } else {
+                    console.error("Coud not unsubscribe "+category+" from WebSocket.");
                 }
             }
         },

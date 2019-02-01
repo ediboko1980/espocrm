@@ -34,7 +34,7 @@ use Ratchet\Wamp\WampServerInterface;
 
 class Pusher implements WampServerInterface
 {
-    protected $categoryList = ['newNotification'];
+    private $categoryList;
 
     protected $connectionIdUserIdMap = [];
 
@@ -44,12 +44,17 @@ class Pusher implements WampServerInterface
 
     protected $connections = [];
 
+    public function __construct(array $categoryList = [])
+    {
+        $this->categoryList = $categoryList;
+    }
+
     public function onSubscribe(ConnectionInterface $connection, $topic)
     {
         $topicId = $topic->getId();
         if (!$topicId) return;
 
-        if (!in_array($topicId, $this->categoryList)) return;
+        if (!$this->isCategoryAllowed($topicId)) return;
 
         $connectionId = $connection->resourceId;
 
@@ -69,7 +74,7 @@ class Pusher implements WampServerInterface
         $topicId = $topic->getId();
         if (!$topicId) return;
 
-        if (!in_array($topicId, $this->categoryList)) return;
+        if (!$this->isCategoryAllowed($topicId)) return;
 
         $connectionId = $connection->resourceId;
 
@@ -83,6 +88,11 @@ class Pusher implements WampServerInterface
                 $this->connectionIdTopicIdListMap[$connectionId] = array_splice($this->connectionIdTopicIdListMap[$connectionId], $index, 1);
             }
         }
+    }
+
+    protected function isCategoryAllowed($category)
+    {
+        return in_array($category, $this->categoryList);
     }
 
     protected function getConnectionIdListByUserId($userId)
@@ -196,10 +206,9 @@ class Pusher implements WampServerInterface
     {
     }
 
-    public function onMessageReceive($data)
+    public function onMessageReceive($dataString)
     {
-        $dataAssoc = json_decode($data, true);
-        $data = json_decode($data);
+        $data = json_decode($dataString);
 
         if (!property_exists($data, 'category')) return;
         if (!property_exists($data, 'userId')) return;
@@ -211,10 +220,6 @@ class Pusher implements WampServerInterface
 
         if (!in_array($category, $this->categoryList)) return;
 
-        print_r($this->connectionIdTopicIdListMap);
-        print_r($this->userIdConnectionIdListMap);
-        print_r($this->connectionIdUserIdMap);
-
         foreach ($this->getConnectionIdListByUserId($userId) as $connectionId) {
             if (!isset($this->connections[$connectionId])) continue;
             if (!isset($this->connectionIdTopicIdListMap[$connectionId])) continue;
@@ -223,7 +228,7 @@ class Pusher implements WampServerInterface
 
             if (in_array($category, $this->connectionIdTopicIdListMap[$connectionId])) {
                 echo "send {$category} for connection {$connectionId}\n";
-                $connection->event($category, $dataAssoc);
+                $connection->event($category, $data);
             }
         }
 
