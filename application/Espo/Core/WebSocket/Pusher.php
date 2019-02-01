@@ -49,13 +49,6 @@ class Pusher implements WampServerInterface
         $topicId = $topic->getId();
         if (!$topicId) return;
 
-        echo "onSubscribe {$topicId}\n";
-
-        if (strpos($topicId, 'user.') === 0) {
-            $this->subscribeUser($connection, substr($topicId, 5));
-            return;
-        }
-
         if (!in_array($topicId, $this->categoryList)) return;
 
         $connectionId = $connection->resourceId;
@@ -66,7 +59,7 @@ class Pusher implements WampServerInterface
         if (!isset($this->connectionIdTopicIdListMap[$connectionId])) $this->connectionIdTopicIdListMap[$connectionId] = [];
 
         if (!in_array($topicId, $this->connectionIdTopicIdListMap[$connectionId])) {
-            echo "add topic {$topicId} for {$userId}\n";
+            echo "add topic {$topicId} for user {$userId}\n";
             $this->connectionIdTopicIdListMap[$connectionId][] = $topicId;
         }
     }
@@ -75,13 +68,6 @@ class Pusher implements WampServerInterface
     {
         $topicId = $topic->getId();
         if (!$topicId) return;
-
-        echo "onUnSubscribe {$topicId}\n";
-
-        if (strpos($topicId, 'user.') === 0) {
-            $this->unSubscribeUser($connection, substr($topicId, 5));
-            return;
-        }
 
         if (!in_array($topicId, $this->categoryList)) return;
 
@@ -93,7 +79,7 @@ class Pusher implements WampServerInterface
         if (isset($this->connectionIdTopicIdListMap[$connectionId])) {
             $index = array_search($topicId, $this->connectionIdTopicIdListMap[$connectionId]);
             if ($index !== false) {
-                echo "remove topic {$topicId} for {$userId}\n";
+                echo "remove topic {$topicId} for user {$userId}\n";
                 $this->connectionIdTopicIdListMap[$connectionId] = array_splice($this->connectionIdTopicIdListMap[$connectionId], $index, 1);
             }
         }
@@ -124,9 +110,11 @@ class Pusher implements WampServerInterface
         }
 
         $this->connections[$resourceId] = $connection;
+
+        echo "{$userId} subscribed\n";
     }
 
-    protected function unSubscribeUser(ConnectionInterface $connection, $userId)
+    protected function unsubscribeUser(ConnectionInterface $connection, $userId)
     {
         $resourceId = $connection->resourceId;
 
@@ -138,11 +126,46 @@ class Pusher implements WampServerInterface
                 $this->userIdConnectionIdListMap[$userId] = array_splice($this->userIdConnectionIdListMap[$userId], $index, 1);
             }
         }
+
+        echo "{$userId} unsubscribed\n";
     }
 
     public function onOpen(ConnectionInterface $connection)
     {
         echo "onOpen {$connection->resourceId}\n";
+
+        $query = $connection->httpRequest->getUri()->getQuery();
+        $params = \GuzzleHttp\Psr7\parse_query($query ?: '');
+        if (empty($params['userId']) || empty($params['authToken'])) {
+            $this->closeConnection($connection);
+            return;
+        }
+
+        $authToken = preg_replace('/[^a-zA-Z0-9]+/', '', $params['authToken']);
+        $userId = $params['userId'];
+
+        $result = shell_exec("php auth_token_check.php " . $authToken);
+        if (empty($result)) {
+            $this->closeConnection($connection);
+            return;
+        }
+
+        if ($result !== $userId) {
+            $this->closeConnection($connection);
+            return;
+        }
+
+        $this->subscribeUser($connection, $userId);
+    }
+
+    protected function closeConnection(ConnectionInterface $connection)
+    {
+        $userId = $this->getUserIdByConnection($connection);
+        if ($userId) {
+            $this->unsubscribeUser($connection, $userId);
+        }
+
+        $connection->close();
     }
 
     public function onClose(ConnectionInterface $connection)
@@ -152,7 +175,7 @@ class Pusher implements WampServerInterface
         $userId = $this->getUserIdByConnection($connection);
 
         if ($userId) {
-            $this->unSubscribeUser($connection, $userId);
+            $this->unsubscribeUser($connection, $userId);
         }
 
         unset($this->connections[$connection->resourceId]);
@@ -160,16 +183,12 @@ class Pusher implements WampServerInterface
 
     public function onCall(ConnectionInterface $connection, $id, $topic, array $params)
     {
-        echo "onPublish {$connection->resourceId} {$id}\n";
-
         $connection->callError($id, $topic, 'You are not allowed to make calls')->close();
     }
 
     public function onPublish(ConnectionInterface $connection, $topic, $event, array $exclude, array $eligible)
     {
         $topicId = $topic->getId();
-        echo "onPublish {$connection->resourceId} {$topicId}\n";
-
         $connection->close();
     }
 

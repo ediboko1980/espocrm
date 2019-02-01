@@ -73,11 +73,12 @@ Espo.define('web-socket-manager', ['lib!client/lib/autobahn.js'], function () {
                 var authArray = Base64.decode(auth).split(':');
                 var username = authArray[0];
                 var authToken = authArray[1];
-                var url = this.protocolPart + username + ':' + authToken + '@' + this.url + ':' + this.port;
+                var url = this.protocolPart + this.url + ':' + this.port;
+
+                url += '?authToken=' + authToken + '&userId=' + userId;
+
                 var connection = this.connection = new ab.Session(url,
-                    function () {
-                        connection.subscribe('user.' + userId)
-                    }.bind(this),
+                    function () {},
                     function () {},
                     {'skipSubprotocolCheck': true}
                 );
